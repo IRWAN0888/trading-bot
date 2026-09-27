@@ -11,7 +11,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 gemini_model = None
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
