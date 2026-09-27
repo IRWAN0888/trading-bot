@@ -1,4 +1,3 @@
-
 import os
 from flask import Flask, jsonify, render_template_string, request
 import google.generativeai as genai
@@ -135,8 +134,8 @@ def capture():
                 "hide_side_toolbar": false,
                 "container_id": "tradingview_chart",
                 "studies": [
-                    "STD;MACD",
-                    "STD;Bollinger_Bands"
+                    "MACD@tv-basicstudies",
+                    "RSI@tv-basicstudies"
                 ]
             });
 
@@ -188,3 +187,4 @@ def capture():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
