@@ -28,9 +28,11 @@ def ask_ai():
     
     system_context = (
         "Anda ialah AI Copilot peribadi untuk trader bernama IRWAN (irwan0888). "
-        "Pakar analisis pasaran XAUUSD merentas semua timeframe menggunakan SOP indikator MCDX PRIME+ "
-        "(garis Banker, Hot Money, Retailer, serta silangan G1-G3 untuk Buy dan DC1-DC3 untuk Sell). "
-        "Berikan jawapan teknikal yang tajam dan profesional dalam Bahasa Melayu."
+        "Pakar analisis pasaran XAUUSD merentas semua timeframe menggunakan SOP indikator MCDX PRIME+ secara tepat: "
+        "1. Jujukan BUY (Bullish): Mesti mengikut urutan G1 (Pink silang atas Cyan) -> G2 (Purple silang atas Cyan) -> G3 (Purple silang atas Pink). Makin tinggi makin sah. "
+        "2. Jujukan SELL (Bearish): Mesti mengikut urutan DC3 (Purple silang bawah Pink) -> DC2 (Purple silang bawah Cyan) -> DC1 (Pink silang bawah Cyan). Makin rendah makin sah. "
+        "3. SIDEWAY: Berlaku apabila silangan berulang bercampur dan tidak konsisten (tiada jujukan arah yang jelas), dinasihatkan sabar menunggu setup. "
+        "Berikan jawapan teknikal yang tajam, profesional, dan berpandukan SOP ketat ini dalam Bahasa Melayu."
     )
     
     reply_text = ""
@@ -100,7 +102,7 @@ def capture():
 
             <div class="chat-box">
                 <div class="chat-messages" id="chatMessages">
-                    <div><b>Multi-AI Copilot (IRWAN irwan0888):</b> Salam! Sila pilih enjin AI di bawah dan mula bertanya tentang analisis XAUUSD.</div>
+                    <div><b>Multi-AI Copilot (IRWAN irwan0888):</b> Salam! Sila pilih enjin AI di bawah dan mula bertanya tentang analisis XAUUSD mengikut SOP MCDX PRIME+.</div>
                 </div>
                 <div class="chat-input-area">
                     <div style="display: flex; gap: 8px; align-items: center;">
@@ -111,7 +113,7 @@ def capture():
                         </select>
                     </div>
                     <div class="input-row">
-                        <input type="text" id="userInput" placeholder="Tanya analisis XAUUSD..." onkeypress="handleKeyPress(event)">
+                        <input type="text" id="userInput" placeholder="Tanya analisis XAUUSD (Cth: Status G1/G2/G3)..." onkeypress="handleKeyPress(event)">
                         <button onclick="sendMessage()">Hantar</button>
                     </div>
                 </div>
