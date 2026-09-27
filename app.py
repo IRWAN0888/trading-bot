@@ -1,3 +1,4 @@
+
 import os
 from flask import Flask, jsonify, render_template_string, request
 
@@ -5,7 +6,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "XAUUSD MCDX PRIME+ AI Copilot is Live!"
+    return "XAUUSD MCDX PRIME+ AI Copilot by IRWAN (irwan0888) is Live!"
 
 @app.route('/capture')
 def capture():
@@ -13,11 +14,11 @@ def capture():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>XAUUSD MCDX PRIME+ AI Copilot</title>
+        <title>XAUUSD MCDX PRIME+ AI Copilot - IRWAN (irwan0888)</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; margin: 0; padding: 10px; }
-            h1 { color: #f2a900; font-size: 16px; text-align: center; }
+            h1 { color: #f2a900; font-size: 15px; text-align: center; }
             .container { display: flex; flex-direction: column; gap: 12px; }
             .chart-box { background: #1e222d; padding: 8px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
             .chat-box { background: #1e222d; padding: 12px; border-radius: 8px; height: 260px; display: flex; flex-direction: column; }
@@ -31,7 +32,7 @@ def capture():
         </style>
     </head>
     <body>
-        <h1>XAUUSD MCDX PRIME+ Multi-Timeframe Copilot</h1>
+        <h1>XAUUSD MCDX PRIME+ Copilot — Hak Milik: IRWAN (irwan0888)</h1>
         
         <div class="container">
             <div class="tf-buttons">
@@ -49,10 +50,10 @@ def capture():
 
             <div class="chat-box">
                 <div class="chat-messages" id="chatMessages">
-                    <div><b>Gemini Copilot:</b> Salam, Trader! Sedia membantu analisis SOP MCDX PRIME+ (G1/G2/G3 & DC1/DC2/DC3) merentas semua timeframe untuk XAUUSD.</div>
+                    <div><b>Gemini Copilot (IRWAN irwan0888):</b> Salam, Trader! Sistem pemantauan MCDX PRIME+ aktif sepenuhnya mengikut SOP G1-G3 & DC1-DC3 merentas semua timeframe.</div>
                 </div>
                 <div class="chat-input-area">
-                    <input type="text" id="userInput" placeholder="Tanya analisis (cth: Status G2 H4 & M15)..." onkeypress="handleKeyPress(event)">
+                    <input type="text" id="userInput" placeholder="Tanya analisis SOP (cth: Status G2 H4)..." onkeypress="handleKeyPress(event)">
                     <button onclick="sendMessage()">Hantar</button>
                 </div>
             </div>
@@ -90,15 +91,15 @@ def capture():
                 messages.innerHTML += '<div style="margin-top:6px;"><b>Anda:</b> ' + text + '</div>';
                 
                 var query = text.toLowerCase();
-                var reply = "Analisis MCDX PRIME+: Sila semak silangan Banker, Hot Money, dan Retailer pada carta mengikut SOP tertib G1, G2, G3 untuk Buy atau DC1, DC2, DC3 untuk Sell.";
+                var reply = "Analisis SOP MCDX PRIME+ (irwan0888): Sila semak silangan Banker, Hot Money, dan Retailer mengikut tertib G1, G2, G3 untuk Buy atau DC1, DC2, DC3 untuk Sell.";
                 if(query.includes("g2") || query.includes("buy")) {
-                    reply = "SOP Buy (G2/G3): Pastikan Banker menolak harga naik dengan dominasi kukuh melepasi garisan rujukan untuk mengesahkan penyertaan posisi Buy yang berkualiti.";
+                    reply = "SOP Buy (G2/G3): Banker mendominasi dan menolak harga naik melepasi garisan rujukan untuk pengesahan posisi Buy.";
                 } else if(query.includes("dc2") || query.includes("sell")) {
-                    reply = "SOP Sell (DC2/DC3): Perhatikan persilangan Dead Cross dan penolakan Retailer/Hot Money yang menunjukkan momentum penurunan harga aktif.";
+                    reply = "SOP Sell (DC2/DC3): Dead Cross berlaku bersama penolakan Retailer/Hot Money aktif ke bawah.";
                 }
 
                 setTimeout(function() {
-                    messages.innerHTML += '<div style="margin-top:6px; color:#f2a900;"><b>Gemini Copilot:</b> ' + reply + '</div>';
+                    messages.innerHTML += '<div style="margin-top:6px; color:#f2a900;"><b>Gemini Copilot (IRWAN irwan0888):</b> ' + reply + '</div>';
                     messages.scrollTop = messages.scrollHeight;
                 }, 400);
 
