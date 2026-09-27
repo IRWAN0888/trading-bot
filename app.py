@@ -66,15 +66,15 @@ def capture():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; margin: 0; padding: 10px; }
-            h1 { color: #f2a900; font-size: 15px; text-align: center; }
-            .container { display: flex; flex-direction: column; gap: 12px; }
-            .chart-box { background: #1e222d; padding: 8px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-            .chat-box { background: #1e222d; padding: 12px; border-radius: 8px; height: 320px; display: flex; flex-direction: column; }
-            .chat-messages { flex: 1; overflow-y: auto; background: #131722; padding: 10px; border-radius: 5px; margin-bottom: 8px; font-size: 13px; text-align: left; line-height: 1.4; }
-            .chat-input-area { display: flex; gap: 8px; flex-direction: column; }
-            .input-row { display: flex; gap: 8px; }
-            input[type="text"] { flex: 1; padding: 8px; border-radius: 5px; border: 1px solid #2a2e39; background: #131722; color: #fff; font-size: 13px; }
-            button { padding: 8px 12px; background: #f2a900; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; color: #000; font-size: 13px; }
+            h1 { color: #f2a900; font-size: 14px; text-align: center; }
+            .container { display: flex; flex-direction: column; gap: 10px; }
+            .chart-box { background: #1e222d; padding: 6px; border-radius: 8px; }
+            .chat-box { background: #1e222d; padding: 10px; border-radius: 8px; height: 340px; display: flex; flex-direction: column; }
+            .chat-messages { flex: 1; overflow-y: auto; background: #131722; padding: 10px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; text-align: left; line-height: 1.5; word-break: break-word; }
+            .chat-input-area { display: flex; gap: 6px; flex-direction: column; }
+            .input-row { display: flex; gap: 6px; }
+            input[type="text"] { flex: 1; padding: 8px; border-radius: 5px; border: 1px solid #2a2e39; background: #131722; color: #fff; font-size: 12px; }
+            button { padding: 8px 12px; background: #f2a900; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; color: #000; font-size: 12px; }
             .engine-select { background: #2a2e39; color: #fff; padding: 6px; border-radius: 5px; border: 1px solid #363c4e; font-size: 12px; }
             .tf-buttons { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; }
             .tf-btn { padding: 4px 8px; background: #2a2e39; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; }
@@ -82,7 +82,7 @@ def capture():
         </style>
     </head>
     <body>
-        <h1>XAUUSD MCDX PRIME+ Copilot (Gemini & ChatGPT) — IRWAN (irwan0888)</h1>
+        <h1>XAUUSD MCDX PRIME+ Copilot — IRWAN (irwan0888)</h1>
         
         <div class="container">
             <div class="tf-buttons">
@@ -95,7 +95,7 @@ def capture():
             </div>
 
             <div class="chart-box">
-                <div id="tradingview_chart" style="height: 330px; width: 100%;"></div>
+                <div id="tradingview_chart" style="height: 300px; width: 100%;"></div>
             </div>
 
             <div class="chat-box">
@@ -122,7 +122,7 @@ def capture():
         <script type="text/javascript">
             var tvWidget = new TradingView.widget({
                 "width": "100%",
-                "height": "330",
+                "height": "300",
                 "symbol": "OANDA:XAUUSD",
                 "interval": "D",
                 "timezone": "Etc/UTC",
@@ -133,7 +133,11 @@ def capture():
                 "enable_publishing": true,
                 "allow_symbol_change": true,
                 "hide_side_toolbar": false,
-                "container_id": "tradingview_chart"
+                "container_id": "tradingview_chart",
+                "studies": [
+                    "STD;MACD",
+                    "STD;Bollinger_Bands"
+                ]
             });
 
             function changeTf(tf) {
@@ -150,7 +154,7 @@ def capture():
                 if (!text) return;
 
                 var messages = document.getElementById('chatMessages');
-                messages.innerHTML += '<div style="margin-top:6px;"><b>Anda:</b> ' + text + '</div>';
+                messages.innerHTML += '<div style="margin-top:8px;"><b>Anda:</b> ' + text.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</div>';
                 input.value = '';
                 messages.scrollTop = messages.scrollHeight;
 
@@ -162,11 +166,12 @@ def capture():
                 .then(response => response.json())
                 .then(data => {
                     var engineName = engine === 'chatgpt' ? 'ChatGPT AI' : 'Gemini AI';
-                    messages.innerHTML += '<div style="margin-top:6px; color:#f2a900;"><b>' + engineName + ':</b> ' + data.reply.replace(/\\n/g, '<br>') + '</div>';
+                    var formattedReply = data.reply.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\\n/g, '<br>');
+                    messages.innerHTML += '<div style="margin-top:8px; color:#f2a900;"><b>' + engineName + ':</b><br>' + formattedReply + '</div>';
                     messages.scrollTop = messages.scrollHeight;
                 })
                 .catch(error => {
-                    messages.innerHTML += '<div style="margin-top:6px; color:red;"><b>Ralat:</b> Gagal berhubung dengan pelayan AI.</div>';
+                    messages.innerHTML += '<div style="margin-top:8px; color:red;"><b>Ralat:</b> Gagal berhubung dengan pelayan AI.</div>';
                     messages.scrollTop = messages.scrollHeight;
                 });
             }
