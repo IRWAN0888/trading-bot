@@ -1,4 +1,3 @@
-
 import os
 from flask import Flask, jsonify, render_template_string, request
 
@@ -50,7 +49,7 @@ def capture():
 
             <div class="chat-box">
                 <div class="chat-messages" id="chatMessages">
-                    <div><b>Gemini Copilot (IRWAN irwan0888):</b> Salam, Trader! Sistem pemantauan MCDX PRIME+ aktif sepenuhnya mengikut SOP G1-G3 & DC1-DC3 merentas semua timeframe.</div>
+                    <div><b>Gemini Copilot (IRWAN irwan0888):</b> Salam, Trader! Sila klik ikon profil di penjuru carta untuk log masuk ke akaun TradingView anda sendiri.</div>
                 </div>
                 <div class="chat-input-area">
                     <input type="text" id="userInput" placeholder="Tanya analisis SOP (cth: Status G2 H4)..." onkeypress="handleKeyPress(event)">
@@ -71,8 +70,9 @@ def capture():
                 "style": "1",
                 "locale": "en",
                 "toolbar_bg": "#f1f3f6",
-                "enable_publishing": false,
+                "enable_publishing": true,
                 "allow_symbol_change": true,
+                "hide_side_toolbar": false,
                 "container_id": "tradingview_chart"
             });
 
