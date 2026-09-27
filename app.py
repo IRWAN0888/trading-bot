@@ -5,7 +5,6 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# Konfigurasi API Gemini & ChatGPT
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
