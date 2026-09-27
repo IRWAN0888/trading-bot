@@ -1,127 +1,615 @@
 
 import os
+from datetime import datetime, timezone
+
 from flask import Flask, jsonify, render_template_string, request
+
 import google.generativeai as genai
 from openai import OpenAI
 
+
+# ============================================================
+# IRWAN TRADING AI COPILOT
+# TradingView -> Render -> Gemini / ChatGPT
+# ============================================================
+
 app = Flask(__name__)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# ------------------------------------------------------------
+# API KEYS
+# Set these in Render Environment Variables.
+# Do NOT put real API keys inside this file.
+# ------------------------------------------------------------
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 
+# Optional webhook secret.
+# Leave empty for the first TradingView -> Render test.
+# If you use it, the Pine webhook payload must contain:
+# {"secret":"YOUR_VALUE", ...}
+WEBHOOK_SECRET = os.environ.get("TREND_PLUS_WEBHOOK_SECRET", "").strip()
+
+
+# ------------------------------------------------------------
+# AI CLIENTS
+# ------------------------------------------------------------
 gemini_model = None
+
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-3.8-flash')
-
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
-@app.route('/')
-def home():
-    return "XAUUSD MCDX PRIME+ Multi-AI Copilot by IRWAN (irwan0888) is Live!"
-
-@app.route('/ask', methods=['POST'])
-def ask_ai():
-    data = request.get_json()
-    user_prompt = data.get('prompt', '')
-    ai_engine = data.get('engine', 'gemini')
-    
-    system_context = (
-        "Anda ialah AI Copilot peribadi untuk trader bernama IRWAN (irwan0888). "
-        "Pakar analisis pasaran XAUUSD merentas semua timeframe menggunakan SOP indikator MCDX PRIME+ secara tepat: "
-        "1. Jujukan BUY (Bullish): Mesti mengikut urutan G1 (Pink silang atas Cyan) -> G2 (Purple silang atas Cyan) -> G3 (Purple silang atas Pink). Makin tinggi makin sah. "
-        "2. Jujukan SELL (Bearish): Mesti mengikut urutan DC3 (Purple silang bawah Pink) -> DC2 (Purple silang bawah Cyan) -> DC1 (Pink silang bawah Cyan). Makin rendah makin sah. "
-        "3. SIDEWAY: Berlaku apabila silangan berulang bercampur dan tidak konsisten (tiada jujukan arah yang jelas), dinasihatkan sabar menunggu setup. "
-        "Berikan jawapan teknikal yang tajam, profesional, dan berpandukan SOP ketat ini dalam Bahasa Melayu."
-    )
-    
-    reply_text = ""
     try:
-        if ai_engine == 'chatgpt':
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel("gemini-3.8-flash")
+    except Exception:
+        gemini_model = None
+
+
+openai_client = None
+
+if OPENAI_API_KEY:
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    except Exception:
+        openai_client = None
+
+
+# ------------------------------------------------------------
+# LATEST TREND PLUS DATA
+#
+# TradingView sends the latest confirmed TREND PLUS snapshot
+# to /webhook/trend-plus.
+#
+# This is intentionally stored in RAM for the first version.
+# Render restart will clear this value.
+# ------------------------------------------------------------
+LATEST_TREND_PLUS = {
+    "status": "waiting",
+    "source": "TREND PLUS",
+    "message": "Belum menerima data daripada TradingView."
+}
+
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def build_trend_context():
+    """
+    Convert the latest TradingView TREND PLUS snapshot into
+    readable context for Gemini / ChatGPT.
+    """
+    if not LATEST_TREND_PLUS:
+        return "Belum ada data TREND PLUS daripada TradingView."
+
+    return (
+        "\n\n===== DATA LIVE TERKINI TREND PLUS =====\n"
+        + str(LATEST_TREND_PLUS)
+        + "\n===== TAMAT DATA TREND PLUS =====\n"
+    )
+
+
+# ============================================================
+# HOME
+# ============================================================
+
+@app.route("/")
+def home():
+    return (
+        "XAUUSD TREND PLUS Multi-AI Copilot by IRWAN "
+        "(irwan0888) is Live!"
+    )
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": "IRWAN TREND PLUS AI Copilot",
+        "tradingview_webhook": "/webhook/trend-plus",
+        "trend_plus_data": "/trend-plus",
+        "ask_ai": "/ask",
+        "timestamp_utc": utc_now_iso()
+    })
+
+
+# ============================================================
+# TRADINGVIEW -> RENDER WEBHOOK
+# ============================================================
+
+@app.route("/webhook/trend-plus", methods=["POST"])
+def trend_plus_webhook():
+    global LATEST_TREND_PLUS
+
+    try:
+        data = request.get_json(silent=True)
+
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "JSON data tidak diterima."
+            }), 400
+
+        # Optional secret verification.
+        # If TREND_PLUS_WEBHOOK_SECRET is empty in Render,
+        # no secret check is performed.
+        if WEBHOOK_SECRET:
+            incoming_secret = str(data.get("secret", "")).strip()
+
+            if incoming_secret != WEBHOOK_SECRET:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid webhook secret."
+                }), 401
+
+        # Add server receive timestamp.
+        data["_render_received_utc"] = utc_now_iso()
+
+        # Store the exact TREND PLUS snapshot.
+        LATEST_TREND_PLUS = data
+
+        return jsonify({
+            "status": "ok",
+            "message": "TREND PLUS data diterima oleh Render.",
+            "source": data.get("source"),
+            "symbol": data.get("symbol"),
+            "ticker": data.get("ticker"),
+            "timeframe": data.get("timeframe"),
+            "event": data.get("event"),
+            "received_utc": data["_render_received_utc"]
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Webhook error: {str(e)}"
+        }), 500
+
+
+# ============================================================
+# SHOW LATEST TREND PLUS DATA
+# ============================================================
+
+@app.route("/trend-plus")
+def trend_plus_data():
+    return jsonify({
+        "status": "ok",
+        "data": LATEST_TREND_PLUS
+    })
+
+
+# ============================================================
+# AI ASK ENDPOINT
+# ============================================================
+
+@app.route("/ask", methods=["POST"])
+def ask_ai():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        user_prompt = str(data.get("prompt", "")).strip()
+        ai_engine = str(data.get("engine", "gemini")).strip().lower()
+
+        if not user_prompt:
+            return jsonify({
+                "reply": "Sila masukkan soalan analisis."
+            }), 400
+
+        # ----------------------------------------------------
+        # CORE SOP
+        # ----------------------------------------------------
+        system_context = (
+            "Anda ialah AI Copilot peribadi untuk trader bernama "
+            "IRWAN (irwan0888). "
+            "Anda membantu membaca DATA LIVE TREND PLUS yang dihantar "
+            "oleh TradingView ke Render.\n\n"
+
+            "SOP MCDX PRIME+ yang mesti dihormati:\n"
+            "1. Jujukan BUY (Bullish): "
+            "G1 (Pink silang atas Cyan) -> "
+            "G2 (Purple silang atas Cyan) -> "
+            "G3 (Purple silang atas Pink). "
+            "Makin tinggi makin sah.\n"
+
+            "2. Jujukan SELL (Bearish): "
+            "DC3 (Purple silang bawah Pink) -> "
+            "DC2 (Purple silang bawah Cyan) -> "
+            "DC1 (Pink silang bawah Cyan). "
+            "Makin rendah makin sah.\n"
+
+            "3. SIDEWAY: Berlaku apabila silangan berulang bercampur "
+            "dan tidak konsisten, tanpa jujukan arah yang jelas. "
+            "Dalam keadaan ini nyatakan bahawa setup belum jelas.\n\n"
+
+            "Untuk TREND PLUS, gunakan data yang diterima daripada "
+            "TradingView sebagai sumber utama. "
+            "Jangan mereka-reka nilai indikator yang tidak dihantar.\n"
+
+            "Jika sesuatu data tiada atau bernilai NONE/NA, nyatakan "
+            "bahawa data tersebut belum tersedia.\n\n"
+
+            "Berikan jawapan teknikal, ringkas tetapi tajam, "
+            "profesional dan dalam Bahasa Melayu."
+        )
+
+        full_prompt = (
+            system_context
+            + build_trend_context()
+            + "\n\nSoalan Trader IRWAN:\n"
+            + user_prompt
+        )
+
+        # ----------------------------------------------------
+        # CHATGPT
+        # ----------------------------------------------------
+        if ai_engine == "chatgpt":
             if not openai_client:
-                return jsonify({"reply": "Ralat: Kunci API OpenAI (ChatGPT) belum ditetapkan di Render."}), 400
+                return jsonify({
+                    "reply": (
+                        "Ralat: OPENAI_API_KEY belum ditetapkan "
+                        "di Render."
+                    )
+                }), 400
+
             response = openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": system_context},
-                    {"role": "user", "content": user_prompt}
+                    {
+                        "role": "system",
+                        "content": system_context
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            build_trend_context()
+                            + "\n\n"
+                            + user_prompt
+                        )
+                    }
                 ]
             )
-            reply_text = response.choices[0].message.content
+
+            reply_text = response.choices[0].message.content or ""
+
+        # ----------------------------------------------------
+        # GEMINI
+        # ----------------------------------------------------
         else:
             if not gemini_model:
-                return jsonify({"reply": "Ralat: Kunci API Gemini belum ditetapkan di Render."}), 400
-            response = gemini_model.generate_content(f"{system_context}\n\nSoalan Trader: {user_prompt}")
-            reply_text = response.text
-            
-        return jsonify({"reply": reply_text})
-    except Exception as e:
-        return jsonify({"reply": f"Ralat sambungan API: {str(e)}"}), 500
+                return jsonify({
+                    "reply": (
+                        "Ralat: GEMINI_API_KEY belum ditetapkan "
+                        "di Render."
+                    )
+                }), 400
 
-@app.route('/capture')
+            response = gemini_model.generate_content(full_prompt)
+            reply_text = getattr(response, "text", "") or ""
+
+        return jsonify({
+            "reply": reply_text,
+            "engine": ai_engine,
+            "trend_plus_received": (
+                LATEST_TREND_PLUS.get("status") != "waiting"
+            )
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "reply": f"Ralat sambungan API: {str(e)}"
+        }), 500
+
+
+# ============================================================
+# WEB UI
+# ============================================================
+
+@app.route("/capture")
 def capture():
     html_content = """
     <!DOCTYPE html>
-    <html>
+    <html lang="ms">
     <head>
-        <title>XAUUSD MCDX PRIME+ Multi-AI Copilot - IRWAN (irwan0888)</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta charset="UTF-8">
+        <title>TREND PLUS Multi-AI Copilot - IRWAN</title>
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+
         <style>
-            body { background-color: #131722; color: #d1d4dc; font-family: Arial, sans-serif; margin: 0; padding: 10px; }
-            h1 { color: #f2a900; font-size: 14px; text-align: center; }
-            .container { display: flex; flex-direction: column; gap: 10px; }
-            .chart-box { background: #1e222d; padding: 6px; border-radius: 8px; }
-            .chat-box { background: #1e222d; padding: 10px; border-radius: 8px; height: 340px; display: flex; flex-direction: column; }
-            .chat-messages { flex: 1; overflow-y: auto; background: #131722; padding: 10px; border-radius: 5px; margin-bottom: 8px; font-size: 12px; text-align: left; line-height: 1.5; word-break: break-word; }
-            .chat-input-area { display: flex; gap: 6px; flex-direction: column; }
-            .input-row { display: flex; gap: 6px; }
-            input[type="text"] { flex: 1; padding: 8px; border-radius: 5px; border: 1px solid #2a2e39; background: #131722; color: #fff; font-size: 12px; }
-            button { padding: 8px 12px; background: #f2a900; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; color: #000; font-size: 12px; }
-            .engine-select { background: #2a2e39; color: #fff; padding: 6px; border-radius: 5px; border: 1px solid #363c4e; font-size: 12px; }
-            .tf-buttons { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; }
-            .tf-btn { padding: 4px 8px; background: #2a2e39; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; }
-            .tf-btn.active { background: #f2a900; color: #000; font-weight: bold; }
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                background-color: #131722;
+                color: #d1d4dc;
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 10px;
+            }
+
+            h1 {
+                color: #f2a900;
+                font-size: 14px;
+                text-align: center;
+                margin: 5px 0 10px 0;
+            }
+
+            .container {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                max-width: 1100px;
+                margin: 0 auto;
+            }
+
+            .status-box {
+                background: #1e222d;
+                padding: 8px;
+                border-radius: 8px;
+                font-size: 11px;
+                text-align: center;
+            }
+
+            .status-ok {
+                color: #00c853;
+            }
+
+            .status-wait {
+                color: #f2a900;
+            }
+
+            .chart-box {
+                background: #1e222d;
+                padding: 6px;
+                border-radius: 8px;
+            }
+
+            .chat-box {
+                background: #1e222d;
+                padding: 10px;
+                border-radius: 8px;
+                height: 380px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .chat-messages {
+                flex: 1;
+                overflow-y: auto;
+                background: #131722;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 8px;
+                font-size: 12px;
+                text-align: left;
+                line-height: 1.5;
+                word-break: break-word;
+            }
+
+            .chat-input-area {
+                display: flex;
+                gap: 6px;
+                flex-direction: column;
+            }
+
+            .input-row {
+                display: flex;
+                gap: 6px;
+            }
+
+            input[type="text"] {
+                flex: 1;
+                padding: 9px;
+                border-radius: 5px;
+                border: 1px solid #2a2e39;
+                background: #131722;
+                color: #fff;
+                font-size: 12px;
+                outline: none;
+            }
+
+            button {
+                padding: 8px 12px;
+                background: #f2a900;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                cursor: pointer;
+                color: #000;
+                font-size: 12px;
+            }
+
+            button:hover {
+                opacity: 0.9;
+            }
+
+            .engine-select {
+                background: #2a2e39;
+                color: #fff;
+                padding: 6px;
+                border-radius: 5px;
+                border: 1px solid #363c4e;
+                font-size: 12px;
+            }
+
+            .tf-buttons {
+                display: flex;
+                gap: 4px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+
+            .tf-btn {
+                padding: 5px 8px;
+                background: #2a2e39;
+                color: #fff;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+            }
+
+            .tf-btn.active {
+                background: #f2a900;
+                color: #000;
+                font-weight: bold;
+            }
+
+            .small-note {
+                color: #9aa0ad;
+                font-size: 10px;
+                text-align: center;
+            }
+
+            @media (max-width: 600px) {
+                body {
+                    padding: 6px;
+                }
+
+                .chat-box {
+                    height: 420px;
+                }
+
+                .input-row {
+                    flex-direction: column;
+                }
+
+                input[type="text"] {
+                    width: 100%;
+                }
+            }
         </style>
     </head>
+
     <body>
-        <h1>XAUUSD MCDX PRIME+ Copilot — IRWAN (irwan0888)</h1>
-        
+        <h1>
+            XAUUSD TREND PLUS Multi-AI Copilot —
+            IRWAN (irwan0888)
+        </h1>
+
         <div class="container">
+
             <div class="tf-buttons">
-                <button class="tf-btn" onclick="changeTf('1')">1m</button>
-                <button class="tf-btn" onclick="changeTf('5')">5m</button>
-                <button class="tf-btn" onclick="changeTf('15')">15m</button>
-                <button class="tf-btn" onclick="changeTf('60')">1h</button>
-                <button class="tf-btn" onclick="changeTf('240')">4h</button>
-                <button class="tf-btn active" onclick="changeTf('D')">Daily</button>
+                <button
+                    class="tf-btn"
+                    onclick="changeTf('1', this)"
+                >1m</button>
+
+                <button
+                    class="tf-btn"
+                    onclick="changeTf('5', this)"
+                >5m</button>
+
+                <button
+                    class="tf-btn"
+                    onclick="changeTf('15', this)"
+                >15m</button>
+
+                <button
+                    class="tf-btn"
+                    onclick="changeTf('60', this)"
+                >1h</button>
+
+                <button
+                    class="tf-btn"
+                    onclick="changeTf('240', this)"
+                >4h</button>
+
+                <button
+                    class="tf-btn active"
+                    onclick="changeTf('D', this)"
+                >Daily</button>
+            </div>
+
+            <div class="status-box" id="trendStatus">
+                Memeriksa data TREND PLUS...
             </div>
 
             <div class="chart-box">
-                <div id="tradingview_chart" style="height: 300px; width: 100%;"></div>
+                <div
+                    id="tradingview_chart"
+                    style="height: 300px; width: 100%;"
+                ></div>
             </div>
 
             <div class="chat-box">
-                <div class="chat-messages" id="chatMessages">
-                    <div><b>Multi-AI Copilot (IRWAN irwan0888):</b> Salam! Sila pilih enjin AI di bawah dan mula bertanya tentang analisis XAUUSD mengikut SOP MCDX PRIME+.</div>
+
+                <div
+                    class="chat-messages"
+                    id="chatMessages"
+                >
+                    <div>
+                        <b>Multi-AI Copilot:</b>
+                        Salam IRWAN. TREND PLUS akan menjadi sumber
+                        data utama selepas TradingView menghantar
+                        webhook ke Render.
+                    </div>
                 </div>
+
                 <div class="chat-input-area">
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <span style="font-size: 12px;">Pilih AI:</span>
-                        <select id="aiEngine" class="engine-select">
-                            <option value="gemini">Gemini AI</option>
-                            <option value="chatgpt">ChatGPT (OpenAI)</option>
+
+                    <div
+                        style="
+                            display:flex;
+                            gap:8px;
+                            align-items:center;
+                        "
+                    >
+                        <span style="font-size:12px;">
+                            Pilih AI:
+                        </span>
+
+                        <select
+                            id="aiEngine"
+                            class="engine-select"
+                        >
+                            <option value="gemini">
+                                Gemini AI
+                            </option>
+
+                            <option value="chatgpt">
+                                ChatGPT (OpenAI)
+                            </option>
                         </select>
                     </div>
+
                     <div class="input-row">
-                        <input type="text" id="userInput" placeholder="Tanya analisis XAUUSD (Cth: Status G1/G2/G3)..." onkeypress="handleKeyPress(event)">
-                        <button onclick="sendMessage()">Hantar</button>
+
+                        <input
+                            type="text"
+                            id="userInput"
+                            placeholder="Contoh: Apakah trend sekarang?"
+                            onkeypress="handleKeyPress(event)"
+                        >
+
+                        <button onclick="sendMessage()">
+                            Hantar
+                        </button>
+
                     </div>
+
+                    <div class="small-note">
+                        AI membaca snapshot TREND PLUS terakhir
+                        yang diterima oleh Render.
+                    </div>
+
                 </div>
             </div>
         </div>
 
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+
+        <script
+            type="text/javascript"
+            src="https://s3.tradingview.com/tv.js"
+        ></script>
+
         <script type="text/javascript">
+
             var tvWidget = new TradingView.widget({
                 "width": "100%",
                 "height": "300",
@@ -142,51 +630,227 @@ def capture():
                 ]
             });
 
-            function changeTf(tf) {
-                document.querySelectorAll('.tf-btn').forEach(btn => btn.classList.remove('active'));
-                event.target.classList.add('active');
-                tvWidget.chart().setResolution(tf, function() {});
+
+            function changeTf(tf, button) {
+
+                document
+                    .querySelectorAll(".tf-btn")
+                    .forEach(function(btn) {
+                        btn.classList.remove("active");
+                    });
+
+                button.classList.add("active");
+
+                try {
+                    tvWidget
+                        .chart()
+                        .setResolution(tf, function() {});
+                } catch (e) {
+                    console.log(e);
+                }
             }
 
+
+            function escapeHtml(text) {
+
+                return String(text)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+
             function sendMessage() {
-                var input = document.getElementById('userInput');
-                var engineSelect = document.getElementById('aiEngine');
+
+                var input =
+                    document.getElementById("userInput");
+
+                var engineSelect =
+                    document.getElementById("aiEngine");
+
                 var text = input.value.trim();
                 var engine = engineSelect.value;
-                if (!text) return;
 
-                var messages = document.getElementById('chatMessages');
-                messages.innerHTML += '<div style="margin-top:8px;"><b>Anda:</b> ' + text.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '</div>';
-                input.value = '';
-                messages.scrollTop = messages.scrollHeight;
+                if (!text) {
+                    return;
+                }
 
-                fetch('/ask', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: text, engine: engine })
+                var messages =
+                    document.getElementById("chatMessages");
+
+                messages.innerHTML +=
+                    '<div style="margin-top:8px;">' +
+                    '<b>Anda:</b> ' +
+                    escapeHtml(text) +
+                    '</div>';
+
+                input.value = "";
+
+                messages.scrollTop =
+                    messages.scrollHeight;
+
+                fetch("/ask", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        prompt: text,
+                        engine: engine
+                    })
                 })
-                .then(response => response.json())
-                .then(data => {
-                    var engineName = engine === 'chatgpt' ? 'ChatGPT AI' : 'Gemini AI';
-                    var formattedReply = data.reply.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\\n/g, '<br>');
-                    messages.innerHTML += '<div style="margin-top:8px; color:#f2a900;"><b>' + engineName + ':</b><br>' + formattedReply + '</div>';
-                    messages.scrollTop = messages.scrollHeight;
+                .then(function(response) {
+                    return response.json();
                 })
-                .catch(error => {
-                    messages.innerHTML += '<div style="margin-top:8px; color:red;"><b>Ralat:</b> Gagal berhubung dengan pelayan AI.</div>';
-                    messages.scrollTop = messages.scrollHeight;
+                .then(function(data) {
+
+                    var engineName =
+                        engine === "chatgpt"
+                            ? "ChatGPT AI"
+                            : "Gemini AI";
+
+                    var reply =
+                        data.reply || "Tiada jawapan.";
+
+                    var formattedReply =
+                        escapeHtml(reply)
+                            .replace(/\n/g, "<br>");
+
+                    messages.innerHTML +=
+                        '<div style="' +
+                        'margin-top:8px;' +
+                        'color:#f2a900;' +
+                        '">' +
+                        '<b>' +
+                        engineName +
+                        ':</b><br>' +
+                        formattedReply +
+                        '</div>';
+
+                    messages.scrollTop =
+                        messages.scrollHeight;
+                })
+                .catch(function(error) {
+
+                    messages.innerHTML +=
+                        '<div style="' +
+                        'margin-top:8px;' +
+                        'color:red;' +
+                        '">' +
+                        '<b>Ralat:</b> ' +
+                        'Gagal berhubung dengan pelayan AI.' +
+                        '</div>';
+
+                    messages.scrollTop =
+                        messages.scrollHeight;
+
+                    console.log(error);
                 });
             }
 
+
             function handleKeyPress(e) {
-                if (e.key === 'Enter') { sendMessage(); }
+
+                if (e.key === "Enter") {
+                    sendMessage();
+                }
             }
+
+
+            function refreshTrendStatus() {
+
+                fetch("/trend-plus")
+                    .then(function(response) {
+                        return response.json();
+                    })
+                    .then(function(result) {
+
+                        var box =
+                            document.getElementById(
+                                "trendStatus"
+                            );
+
+                        var data = result.data || {};
+
+                        if (data.status === "waiting") {
+
+                            box.className =
+                                "status-box status-wait";
+
+                            box.innerHTML =
+                                "TREND PLUS: Menunggu " +
+                                "data TradingView...";
+                            return;
+                        }
+
+                        box.className =
+                            "status-box status-ok";
+
+                        var symbol =
+                            data.symbol || "-";
+
+                        var tf =
+                            data.timeframe || "-";
+
+                        var event =
+                            data.event || "NONE";
+
+                        var trend =
+                            data.external_trend || "-";
+
+                        box.innerHTML =
+                            "TREND PLUS LIVE — " +
+                            escapeHtml(symbol) +
+                            " | TF: " +
+                            escapeHtml(tf) +
+                            " | EVENT: " +
+                            escapeHtml(event) +
+                            " | TREND: " +
+                            escapeHtml(trend);
+                    })
+                    .catch(function() {
+
+                        var box =
+                            document.getElementById(
+                                "trendStatus"
+                            );
+
+                        box.className =
+                            "status-box status-wait";
+
+                        box.innerHTML =
+                            "TREND PLUS: Gagal membaca " +
+                            "data Render.";
+                    });
+            }
+
+
+            refreshTrendStatus();
+
+            setInterval(
+                refreshTrendStatus,
+                5000
+            );
+
         </script>
+
     </body>
     </html>
     """
+
     return render_template_string(html_content)
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+
+# ============================================================
+# LOCAL / RENDER START
+# ============================================================
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
