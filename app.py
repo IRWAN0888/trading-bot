@@ -9,6 +9,7 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
+gemini_model = None
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     gemini_model = genai.GenerativeModel('gemini-1.5-flash')
@@ -34,7 +35,9 @@ def ask_ai():
     
     reply_text = ""
     try:
-        if ai_engine == 'chatgpt' and openai_client:
+        if ai_engine == 'chatgpt':
+            if not openai_client:
+                return jsonify({"reply": "Ralat: Kunci API OpenAI (ChatGPT) belum ditetapkan di Render."}), 400
             response = openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -43,11 +46,11 @@ def ask_ai():
                 ]
             )
             reply_text = response.choices[0].message.content
-        elif gemini_model:
+        else:
+            if not gemini_model:
+                return jsonify({"reply": "Ralat: Kunci API Gemini belum ditetapkan di Render."}), 400
             response = gemini_model.generate_content(f"{system_context}\n\nSoalan Trader: {user_prompt}")
             reply_text = response.text
-        else:
-            reply_text = "Ralat: Kunci API AI belum dikonfigurasi pada pelayan."
             
         return jsonify({"reply": reply_text})
     except Exception as e:
@@ -97,7 +100,7 @@ def capture():
 
             <div class="chat-box">
                 <div class="chat-messages" id="chatMessages">
-                    <div><b>Multi-AI Copilot (IRWAN irwan0888):</b> Salam! Anda boleh memilih sama ada ingin bertanya kepada Gemini AI atau ChatGPT untuk analisis XAUUSD anda.</div>
+                    <div><b>Multi-AI Copilot (IRWAN irwan0888):</b> Salam! Sila pilih enjin AI di bawah dan mula bertanya tentang analisis XAUUSD.</div>
                 </div>
                 <div class="chat-input-area">
                     <div style="display: flex; gap: 8px; align-items: center;">
