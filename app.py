@@ -20,8 +20,8 @@ def capture():
             h1 { color: #f2a900; font-size: 15px; text-align: center; }
             .container { display: flex; flex-direction: column; gap: 12px; }
             .chart-box { background: #1e222d; padding: 8px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-            .chat-box { background: #1e222d; padding: 12px; border-radius: 8px; height: 260px; display: flex; flex-direction: column; }
-            .chat-messages { flex: 1; overflow-y: auto; background: #131722; padding: 10px; border-radius: 5px; margin-bottom: 8px; font-size: 13px; text-align: left; }
+            .chat-box { background: #1e222d; padding: 12px; border-radius: 8px; height: 280px; display: flex; flex-direction: column; }
+            .chat-messages { flex: 1; overflow-y: auto; background: #131722; padding: 10px; border-radius: 5px; margin-bottom: 8px; font-size: 13px; text-align: left; line-height: 1.4; }
             .chat-input-area { display: flex; gap: 8px; }
             input[type="text"] { flex: 1; padding: 8px; border-radius: 5px; border: 1px solid #2a2e39; background: #131722; color: #fff; font-size: 13px; }
             button { padding: 8px 12px; background: #f2a900; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; color: #000; font-size: 13px; }
@@ -44,15 +44,15 @@ def capture():
             </div>
 
             <div class="chart-box">
-                <div id="tradingview_chart" style="height: 380px; width: 100%;"></div>
+                <div id="tradingview_chart" style="height: 360px; width: 100%;"></div>
             </div>
 
             <div class="chat-box">
                 <div class="chat-messages" id="chatMessages">
-                    <div><b>Gemini Copilot (IRWAN irwan0888):</b> Salam, Trader! Sila klik ikon profil di penjuru carta untuk log masuk ke akaun TradingView anda sendiri.</div>
+                    <div><b>Gemini Copilot (IRWAN irwan0888):</b> Salam, Trader! Sedia melaksanakan analisis terperinci mengikut SOP MCDX PRIME+ (G1-G3 & DC1-DC3). Silakan beri arahan atau persoalan anda.</div>
                 </div>
                 <div class="chat-input-area">
-                    <input type="text" id="userInput" placeholder="Tanya analisis SOP (cth: Status G2 H4)..." onkeypress="handleKeyPress(event)">
+                    <input type="text" id="userInput" placeholder="Taip arahan analisis (cth: Buat analisis XAUUSD sekarang)..." onkeypress="handleKeyPress(event)">
                     <button onclick="sendMessage()">Hantar</button>
                 </div>
             </div>
@@ -62,7 +62,7 @@ def capture():
         <script type="text/javascript">
             var tvWidget = new TradingView.widget({
                 "width": "100%",
-                "height": "380",
+                "height": "360",
                 "symbol": "OANDA:XAUUSD",
                 "interval": "D",
                 "timezone": "Etc/UTC",
@@ -91,11 +91,19 @@ def capture():
                 messages.innerHTML += '<div style="margin-top:6px;"><b>Anda:</b> ' + text + '</div>';
                 
                 var query = text.toLowerCase();
-                var reply = "Analisis SOP MCDX PRIME+ (irwan0888): Sila semak silangan Banker, Hot Money, dan Retailer mengikut tertib G1, G2, G3 untuk Buy atau DC1, DC2, DC3 untuk Sell.";
-                if(query.includes("g2") || query.includes("buy")) {
-                    reply = "SOP Buy (G2/G3): Banker mendominasi dan menolak harga naik melepasi garisan rujukan untuk pengesahan posisi Buy.";
-                } else if(query.includes("dc2") || query.includes("sell")) {
-                    reply = "SOP Sell (DC2/DC3): Dead Cross berlaku bersama penolakan Retailer/Hot Money aktif ke bawah.";
+                var reply = "";
+
+                if (query.includes("analisis") || query.includes("buat") || query.includes("kemana")) {
+                    reply = "<b>Hasil Analisis Semasa XAUUSD (MCDX PRIME+):</b><br>" +
+                            "1. <b>Struktur Timeframe Besar (Daily / 4H):</b> Harga menunjukkan fasa konsolidasi berhampiran zon sokongan utama. Perhatikan bar Banker dan Hot Money.<br>" +
+                            "2. <b>SOP Tertib:</b> Jika berlaku silangan G2 atau G3 (Banker menolak harga naik), ia mengesahkan peluang <b>BUY</b>.<br>" +
+                            "3. <b>Amaran Risiko:</b> Sentiasa semak silangan Dead Cross (DC2/DC3) pada timeframe lebih kecil (M15/M5) sebelum masuk posisi.";
+                } else if (query.includes("g2") || query.includes("g3") || query.includes("buy")) {
+                    reply = "<b>SOP BUY Terperinci:</b> G2 dan G3 terbentuk apabila garisan Banker bersilang di atas garisan Retailer/Hot Money dengan dominasi bar hijau/merah yang kuat. Pastikan tiada halangan rintangan terdekat.";
+                } else if (query.includes("dc") || query.includes("sell")) {
+                    reply = "<b>SOP SELL Terperinci:</b> Kemunculan DC1, DC2, atau DC3 menandakan Retailer mula mendominasi penurunan harga. Keluar dari posisi Buy dan bersedia untuk kemasukan Sell yang tertib.";
+                } else {
+                    reply = "Analisis diterima untuk sistem <b>irwan0888</b>. Sila pastikan carta pada timeframe pilihan anda mematuhi peraturan silangan G1-G3 atau DC1-DC3 sebelum melakukan eksekusi dagangan.";
                 }
 
                 setTimeout(function() {
