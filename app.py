@@ -615,13 +615,12 @@ def capture():
 
 
             function escapeHtml(text) {
-
                 return String(text)
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
-                    .replace(/"/g, "&quot;")
-                    .replace(/'/g, "&#039;");
+                    .split("&").join("&amp;")
+                    .split("<").join("&lt;")
+                    .split(">").join("&gt;")
+                    .split('"').join("&quot;")
+                    .split("'").join("&#039;");
             }
 
 
@@ -675,7 +674,7 @@ def capture():
 
                     var formattedReply =
                         escapeHtml(reply)
-                            .replace(/\n/g, "<br>");
+                            .replace(/\\n/g, "<br>");
 
                     messages.innerHTML +=
                         '<div style="' +
@@ -719,11 +718,6 @@ def capture():
             function refreshTrendStatus() {
 
                 var box = document.getElementById("trendStatus");
-
-                // Paparkan status terus; jangan tunggu fetch.
-                box.className = "status-box status-wait";
-                box.innerHTML =
-                    "TREND PLUS: Menunggu data TradingView...";
 
                 var controller = new AbortController();
 
