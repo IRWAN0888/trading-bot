@@ -718,70 +718,75 @@ def capture():
 
             function refreshTrendStatus() {
 
-                fetch("/trend-plus")
-                    .then(function(response) {
-                        return response.json();
-                    })
-                    .then(function(result) {
+                var box = document.getElementById("trendStatus");
 
-                        var box =
-                            document.getElementById(
-                                "trendStatus"
-                            );
+                // Paparkan status terus; jangan tunggu fetch.
+                box.className = "status-box status-wait";
+                box.innerHTML =
+                    "TREND PLUS: Menunggu data TradingView...";
 
-                        var data = result.data || {};
+                var controller = new AbortController();
 
-                        if (data.status === "waiting") {
+                var timeoutId = setTimeout(function() {
+                    controller.abort();
+                }, 4000);
 
-                            box.className =
-                                "status-box status-wait";
+                fetch("/trend-plus?_=" + Date.now(), {
+                    method: "GET",
+                    cache: "no-store",
+                    signal: controller.signal
+                })
+                .then(function(response) {
 
-                            box.innerHTML =
-                                "TREND PLUS: Menunggu " +
-                                "data TradingView...";
-                            return;
-                        }
+                    clearTimeout(timeoutId);
 
-                        box.className =
-                            "status-box status-ok";
+                    if (!response.ok) {
+                        throw new Error("HTTP " + response.status);
+                    }
 
-                        var symbol =
-                            data.symbol || "-";
+                    return response.json();
+                })
+                .then(function(result) {
 
-                        var tf =
-                            data.timeframe || "-";
+                    var data = result.data || {};
 
-                        var event =
-                            data.event || "NONE";
-
-                        var trend =
-                            data.external_trend || "-";
-
+                    if (data.status === "waiting") {
+                        box.className = "status-box status-wait";
                         box.innerHTML =
-                            "TREND PLUS LIVE — " +
-                            escapeHtml(symbol) +
-                            " | TF: " +
-                            escapeHtml(tf) +
-                            " | EVENT: " +
-                            escapeHtml(event) +
-                            " | TREND: " +
-                            escapeHtml(trend);
-                    })
-                    .catch(function() {
+                            "TREND PLUS: Menunggu data TradingView...";
+                        return;
+                    }
 
-                        var box =
-                            document.getElementById(
-                                "trendStatus"
-                            );
+                    box.className = "status-box status-ok";
 
-                        box.className =
-                            "status-box status-wait";
+                    var symbol = data.symbol || "-";
+                    var tf = data.timeframe || "-";
+                    var event = data.event || "NONE";
+                    var trend = data.external_trend || "NONE";
 
-                        box.innerHTML =
-                            "TREND PLUS: Gagal membaca " +
-                            "data Render.";
-                    });
+                    box.innerHTML =
+                        "TREND PLUS LIVE — " +
+                        escapeHtml(symbol) +
+                        " | TF: " +
+                        escapeHtml(tf) +
+                        " | EVENT: " +
+                        escapeHtml(event) +
+                        " | TREND: " +
+                        escapeHtml(trend);
+                })
+                .catch(function(error) {
+
+                    clearTimeout(timeoutId);
+
+                    box.className = "status-box status-wait";
+                    box.innerHTML =
+                        "TREND PLUS: Render aktif — " +
+                        "menunggu TradingView.";
+
+                    console.log("TREND PLUS status:", error);
+                });
             }
+
 
 
             // Poll Render independently of TradingView embed.
