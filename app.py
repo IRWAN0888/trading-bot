@@ -1,255 +1,786 @@
 import os
-import json
 from datetime import datetime, timezone
+
 from flask import Flask, jsonify, render_template_string, request
 
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
+import google.generativeai as genai
+from openai import OpenAI
 
-try:
-    import google.generativeai as genai
-except Exception:
-    genai = None
+
+# ============================================================
+# IRWAN TRADING AI COPILOT
+# TradingView -> Render -> Gemini / ChatGPT
+# ============================================================
 
 app = Flask(__name__)
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+# ------------------------------------------------------------
+# API KEYS
+# Set these in Render Environment Variables.
+# Do NOT put real API keys inside this file.
+# ------------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+
+# Optional webhook secret.
+# Leave empty for the first TradingView -> Render test.
 WEBHOOK_SECRET = os.environ.get("TREND_PLUS_WEBHOOK_SECRET", "").strip()
 
-latest_trend_data = {}
-latest_received_at = None
 
-openai_client = None
-if OPENAI_API_KEY and OpenAI is not None:
-    try:
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    except Exception:
-        openai_client = None
-
+# ------------------------------------------------------------
+# AI CLIENTS
+# ------------------------------------------------------------
 gemini_model = None
-if GEMINI_API_KEY and genai is not None:
+
+if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         gemini_model = genai.GenerativeModel(
-            os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+            os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
         )
     except Exception:
         gemini_model = None
 
 
-def build_system_prompt():
-    return """
-Anda ialah AI Copilot trading peribadi IRWAN.
+openai_client = None
 
-Gunakan DATA TERKINI TREND PLUS yang dihantar daripada TradingView.
-Jangan reka data indikator yang tidak diberikan.
-
-Tugas utama:
-1. Terangkan trend semasa berdasarkan data TREND PLUS.
-2. Bezakan BUY, SELL dan SIDEWAY berdasarkan data sebenar.
-3. Gunakan Market Structure, Purple Core, M-Structure,
-   Order Block, Supply/Demand, Breakout, REMPIT dan MTF
-   jika data tersebut tersedia.
-4. Jika data tidak cukup, nyatakan dengan jelas data apa yang tiada.
-5. Jangan mendakwa melihat carta secara langsung jika data carta
-   belum diterima oleh Render.
-6. Jawapan dalam Bahasa Melayu.
-7. Jangan beri jaminan keuntungan.
-
-Format ringkas:
-- TREND
-- MARKET STRUCTURE
-- PURPLE CORE
-- M-STRUCTURE
-- ORDER BLOCK / SUPPLY DEMAND
-- BREAKOUT / SIGNAL
-- MTF
-- RUMUSAN
-"""
+if OPENAI_API_KEY:
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    except Exception:
+        openai_client = None
 
 
-def trend_snapshot():
-    if not latest_trend_data:
-        return {
-            "status": "NO_DATA",
-            "message": "Belum menerima data TREND PLUS daripada TradingView."
-        }
-    return {
-        "status": "OK",
-        "received_at": latest_received_at,
-        "data": latest_trend_data
-    }
+# ------------------------------------------------------------
+# LATEST TREND PLUS DATA
+# ------------------------------------------------------------
+LATEST_TREND_PLUS = {
+    "status": "waiting",
+    "source": "TREND PLUS",
+    "message": "Belum menerima data daripada TradingView."
+}
 
 
-def trend_context():
-    if not latest_trend_data:
-        return "TREND PLUS belum menghantar data. Jangan reka nilai indikator."
-    return json.dumps(latest_trend_data, ensure_ascii=False, separators=(",", ":"))
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
+
+def build_trend_context():
+    if not LATEST_TREND_PLUS:
+        return "Belum ada data TREND PLUS daripada TradingView."
+
+    return (
+        "\n\n===== DATA LIVE TERKINI TREND PLUS =====\n"
+        + str(LATEST_TREND_PLUS)
+        + "\n===== TAMAT DATA TREND PLUS =====\n"
+    )
+
+
+# ============================================================
+# HOME
+# ============================================================
 
 @app.route("/")
 def home():
-    return "TREND PLUS AI COPILOT by IRWAN is LIVE. TradingView -> Render connection ready."
+    return (
+        "XAUUSD TREND PLUS Multi-AI Copilot by IRWAN "
+        "(irwan0888) is Live!"
+    )
 
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
 @app.route("/health")
 def health():
     return jsonify({
         "status": "ok",
-        "service": "TREND PLUS AI COPILOT",
-        "tradingview_data": bool(latest_trend_data),
-        "openai_configured": bool(openai_client),
-        "gemini_configured": bool(gemini_model),
-        "webhook_secret_enabled": bool(WEBHOOK_SECRET)
+        "service": "IRWAN TREND PLUS AI Copilot",
+        "tradingview_webhook": "/webhook/trend-plus",
+        "trend_plus_data": "/trend-plus",
+        "ask_ai": "/ask",
+        "timestamp_utc": utc_now_iso()
     })
 
 
+# ============================================================
+# TRADINGVIEW -> RENDER WEBHOOK
+# ============================================================
+
 @app.route("/webhook/trend-plus", methods=["POST"])
 def trend_plus_webhook():
-    global latest_trend_data, latest_received_at
-
-    if WEBHOOK_SECRET:
-        received_secret = request.headers.get("X-TREND-PLUS-SECRET", "").strip()
-        if received_secret != WEBHOOK_SECRET:
-            return jsonify({"status": "error", "message": "Invalid webhook secret."}), 401
+    global LATEST_TREND_PLUS
 
     try:
-        payload = request.get_json(silent=True)
-        if payload is None:
-            raw = request.get_data(as_text=True).strip()
-            if not raw:
-                return jsonify({"status": "error", "message": "Empty webhook body."}), 400
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                return jsonify({"status": "error", "message": "Webhook body is not valid JSON."}), 400
+        data = request.get_json(silent=True)
 
-        if not isinstance(payload, dict):
-            return jsonify({"status": "error", "message": "Payload must be a JSON object."}), 400
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "JSON data tidak diterima."
+            }), 400
 
-        latest_trend_data = payload
-        latest_received_at = datetime.now(timezone.utc).isoformat()
+        if WEBHOOK_SECRET:
+            incoming_secret = str(data.get("secret", "")).strip()
 
-        print("TREND PLUS DATA RECEIVED:")
-        print(json.dumps(payload, ensure_ascii=False))
+            if incoming_secret != WEBHOOK_SECRET:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid webhook secret."
+                }), 401
+
+        data["_render_received_utc"] = utc_now_iso()
+        LATEST_TREND_PLUS = data
+
+        print("TREND PLUS DATA RECEIVED:", data)
 
         return jsonify({
-            "status": "received",
-            "source": payload.get("source", "TREND PLUS"),
-            "symbol": payload.get("symbol"),
-            "timeframe": payload.get("timeframe"),
-            "event": payload.get("event"),
-            "received_at": latest_received_at
+            "status": "ok",
+            "message": "TREND PLUS data diterima oleh Render.",
+            "source": data.get("source"),
+            "symbol": data.get("symbol"),
+            "ticker": data.get("ticker"),
+            "timeframe": data.get("timeframe"),
+            "event": data.get("event"),
+            "received_utc": data["_render_received_utc"]
         }), 200
 
-    except Exception as exc:
-        print(f"Webhook error: {exc}")
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Webhook error: {str(e)}"
+        }), 500
 
+
+# ============================================================
+# SHOW LATEST TREND PLUS DATA
+# ============================================================
 
 @app.route("/trend-plus")
-def trend_plus():
-    return jsonify(trend_snapshot())
+def trend_plus_data():
+    return jsonify({
+        "status": "ok",
+        "data": LATEST_TREND_PLUS
+    })
 
 
 @app.route("/trend-plus/raw")
 def trend_plus_raw():
-    return jsonify(latest_trend_data)
+    return jsonify(LATEST_TREND_PLUS)
 
+
+# ============================================================
+# AI ASK ENDPOINT
+# ============================================================
 
 @app.route("/ask", methods=["POST"])
 def ask_ai():
     try:
         data = request.get_json(silent=True) or {}
+
         user_prompt = str(data.get("prompt", "")).strip()
-        ai_engine = str(data.get("engine", "gemini")).lower().strip()
+        ai_engine = str(data.get("engine", "gemini")).strip().lower()
 
         if not user_prompt:
-            return jsonify({"reply": "Sila masukkan soalan."}), 400
+            return jsonify({
+                "reply": "Sila masukkan soalan analisis."
+            }), 400
 
-        context = trend_context()
+        system_context = (
+            "Anda ialah AI Copilot peribadi untuk trader bernama "
+            "IRWAN (irwan0888). "
+            "Anda membantu membaca DATA LIVE TREND PLUS yang dihantar "
+            "oleh TradingView ke Render.\n\n"
+
+            "SOP MCDX PRIME+ yang mesti dihormati:\n"
+            "1. Jujukan BUY (Bullish): "
+            "G1 (Pink silang atas Cyan) -> "
+            "G2 (Purple silang atas Cyan) -> "
+            "G3 (Purple silang atas Pink). "
+            "Makin tinggi makin sah.\n"
+
+            "2. Jujukan SELL (Bearish): "
+            "DC3 (Purple silang bawah Pink) -> "
+            "DC2 (Purple silang bawah Cyan) -> "
+            "DC1 (Pink silang bawah Cyan). "
+            "Makin rendah makin sah.\n"
+
+            "3. SIDEWAY: Berlaku apabila silangan berulang bercampur "
+            "dan tidak konsisten, tanpa jujukan arah yang jelas. "
+            "Dalam keadaan ini nyatakan bahawa setup belum jelas.\n\n"
+
+            "Untuk TREND PLUS, gunakan data yang diterima daripada "
+            "TradingView sebagai sumber utama. "
+            "Jangan mereka-reka nilai indikator yang tidak dihantar.\n"
+
+            "Jika sesuatu data tiada atau bernilai NONE/NA, nyatakan "
+            "bahawa data tersebut belum tersedia.\n\n"
+
+            "Berikan jawapan teknikal, ringkas tetapi tajam, "
+            "profesional dan dalam Bahasa Melayu."
+        )
+
+        full_prompt = (
+            system_context
+            + build_trend_context()
+            + "\n\nSoalan Trader IRWAN:\n"
+            + user_prompt
+        )
 
         if ai_engine == "chatgpt":
-            if openai_client is None:
+            if not openai_client:
                 return jsonify({
-                    "reply": "OpenAI belum dikonfigurasi di Render. Tambahkan OPENAI_API_KEY."
+                    "reply": (
+                        "Ralat: OPENAI_API_KEY belum ditetapkan "
+                        "di Render."
+                    )
                 }), 400
 
             response = openai_client.chat.completions.create(
                 model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
                 messages=[
-                    {"role": "system", "content": build_system_prompt()},
-                    {"role": "user", "content": "DATA TREND PLUS:\n" + context + "\n\nSOALAN:\n" + user_prompt}
+                    {
+                        "role": "system",
+                        "content": system_context
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            build_trend_context()
+                            + "\n\n"
+                            + user_prompt
+                        )
+                    }
                 ]
             )
-            return jsonify({
-                "engine": "chatgpt",
-                "reply": response.choices[0].message.content or ""
-            })
 
-        if gemini_model is None:
-            return jsonify({
-                "reply": "Gemini belum dikonfigurasi di Render. Tambahkan GEMINI_API_KEY."
-            }), 400
+            reply_text = response.choices[0].message.content or ""
 
-        response = gemini_model.generate_content(
-            build_system_prompt() +
-            "\n\nDATA TREND PLUS:\n" + context +
-            "\n\nSOALAN:\n" + user_prompt
-        )
+        else:
+            if not gemini_model:
+                return jsonify({
+                    "reply": (
+                        "Ralat: GEMINI_API_KEY belum ditetapkan "
+                        "di Render."
+                    )
+                }), 400
+
+            response = gemini_model.generate_content(full_prompt)
+            reply_text = getattr(response, "text", "") or ""
+
         return jsonify({
-            "engine": "gemini",
-            "reply": getattr(response, "text", "") or ""
-        })
+            "reply": reply_text,
+            "engine": ai_engine,
+            "trend_plus_received": (
+                LATEST_TREND_PLUS.get("status") != "waiting"
+            )
+        }), 200
 
-    except Exception as exc:
-        print(f"AI error: {exc}")
-        return jsonify({"reply": f"Ralat sambungan AI: {str(exc)}"}), 500
+    except Exception as e:
+        print(f"AI error: {e}")
+        return jsonify({
+            "reply": f"Ralat sambungan API: {str(e)}"
+        }), 500
 
 
-HTML_PAGE = r'''<!DOCTYPE html>
-<html lang="ms">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TREND PLUS AI Copilot</title>
-<style>
-*{box-sizing:border-box}body{margin:0;padding:10px;background:#131722;color:#d1d4dc;font-family:Arial,sans-serif}
-h1{text-align:center;font-size:16px;color:#f2a900;margin:4px 0 10px}
-.status,.trend-box,.chat-box{background:#1e222d;border-radius:8px;padding:10px;margin-bottom:10px}
-.trend-title{color:#f2a900;font-weight:bold;margin-bottom:6px}
-pre{white-space:pre-wrap;word-break:break-word;font-size:11px;margin:0;color:#ddd}
-.chat-box{height:420px;display:flex;flex-direction:column}.messages{flex:1;overflow-y:auto;background:#131722;border-radius:6px;padding:10px;font-size:12px;line-height:1.5;margin-bottom:8px}
-.row{display:flex;gap:6px}input,select,button{border-radius:5px;border:1px solid #363c4e;padding:9px;font-size:12px}
-input{flex:1;background:#131722;color:#fff}select{background:#2a2e39;color:#fff}button{background:#f2a900;color:#000;border:0;font-weight:bold}.ai{color:#f2a900;margin-top:8px}
-</style></head>
-<body>
-<h1>TREND PLUS AI COPILOT — IRWAN</h1>
-<div class="status" id="status">Memeriksa sambungan Render...</div>
-<div class="trend-box"><div class="trend-title">DATA TREND PLUS TERKINI</div><pre id="trendData">Belum menerima data TradingView.</pre></div>
-<div class="chat-box">
-<div class="messages" id="messages"><div><b>AI Copilot:</b> Tunggu data TREND PLUS daripada TradingView, kemudian boleh tanya analisis.</div></div>
-<div class="row">
-<select id="engine"><option value="gemini">Gemini AI</option><option value="chatgpt">ChatGPT</option></select>
-<input id="prompt" type="text" placeholder="Contoh: Apakah trend sekarang?" onkeypress="handleKey(event)">
-<button onclick="askAI()">Hantar</button>
-</div></div>
-<script>
-async function refreshTrendStatus(){try{const r=await fetch('/trend-plus');const d=await r.json();if(d.status==='OK'){document.getElementById('status').innerText='✅ TradingView → Render OK | '+d.received_at;document.getElementById('trendData').innerText=JSON.stringify(d.data,null,2)}else{document.getElementById('status').innerText='🟡 Render hidup — belum menerima data TradingView.';document.getElementById('trendData').innerText=d.message||'Tiada data.'}}catch(e){document.getElementById('status').innerText='❌ Gagal membaca data TREND PLUS.'}}
-async function askAI(){const input=document.getElementById('prompt'),engine=document.getElementById('engine'),messages=document.getElementById('messages'),text=input.value.trim();if(!text)return;messages.innerHTML+='<div style="margin-top:8px"><b>Anda:</b> '+escapeHtml(text)+'</div>';input.value='';try{const r=await fetch('/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:text,engine:engine.value})});const d=await r.json();messages.innerHTML+='<div class="ai"><b>'+escapeHtml(engine.value)+':</b><br>'+escapeHtml(d.reply||'Tiada jawapan.').replace(/\n/g,'<br>')+'</div>'}catch(e){messages.innerHTML+='<div style="color:red;margin-top:8px"><b>Ralat:</b> Gagal berhubung dengan AI.</div>'}messages.scrollTop=messages.scrollHeight}
-function handleKey(e){if(e.key==='Enter')askAI()}function escapeHtml(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
-refreshTrendStatus();setInterval(refreshTrendStatus,5000);
-</script></body></html>'''
-
+# ============================================================
+# WEB UI
+# ============================================================
 
 @app.route("/capture")
 def capture():
-    return render_template_string(HTML_PAGE)
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="ms">
+    <head>
+        <meta charset="UTF-8">
+        <title>TREND PLUS Multi-AI Copilot - IRWAN</title>
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
 
+        <style>
+            * { box-sizing: border-box; }
+
+            body {
+                background-color: #131722;
+                color: #d1d4dc;
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 10px;
+            }
+
+            h1 {
+                color: #f2a900;
+                font-size: 14px;
+                text-align: center;
+                margin: 5px 0 10px 0;
+            }
+
+            .container {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                max-width: 1100px;
+                margin: 0 auto;
+            }
+
+            .status-box {
+                background: #1e222d;
+                padding: 8px;
+                border-radius: 8px;
+                font-size: 11px;
+                text-align: center;
+            }
+
+            .status-ok { color: #00c853; }
+            .status-wait { color: #f2a900; }
+
+            .chart-box {
+                background: #1e222d;
+                padding: 6px;
+                border-radius: 8px;
+            }
+
+            .chat-box {
+                background: #1e222d;
+                padding: 10px;
+                border-radius: 8px;
+                height: 380px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .chat-messages {
+                flex: 1;
+                overflow-y: auto;
+                background: #131722;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 8px;
+                font-size: 12px;
+                text-align: left;
+                line-height: 1.5;
+                word-break: break-word;
+            }
+
+            .chat-input-area {
+                display: flex;
+                gap: 6px;
+                flex-direction: column;
+            }
+
+            .input-row {
+                display: flex;
+                gap: 6px;
+            }
+
+            input[type="text"] {
+                flex: 1;
+                padding: 9px;
+                border-radius: 5px;
+                border: 1px solid #2a2e39;
+                background: #131722;
+                color: #fff;
+                font-size: 12px;
+                outline: none;
+            }
+
+            button {
+                padding: 8px 12px;
+                background: #f2a900;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                cursor: pointer;
+                color: #000;
+                font-size: 12px;
+            }
+
+            .engine-select {
+                background: #2a2e39;
+                color: #fff;
+                padding: 6px;
+                border-radius: 5px;
+                border: 1px solid #363c4e;
+                font-size: 12px;
+            }
+
+            .tf-buttons {
+                display: flex;
+                gap: 4px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+
+            .tf-btn {
+                padding: 5px 8px;
+                background: #2a2e39;
+                color: #fff;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+            }
+
+            .tf-btn.active {
+                background: #f2a900;
+                color: #000;
+                font-weight: bold;
+            }
+
+            .small-note {
+                color: #9aa0ad;
+                font-size: 10px;
+                text-align: center;
+            }
+
+            @media (max-width: 600px) {
+                body { padding: 6px; }
+
+                .chat-box { height: 420px; }
+
+                .input-row {
+                    flex-direction: column;
+                }
+
+                input[type="text"] {
+                    width: 100%;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <h1>
+            XAUUSD TREND PLUS Multi-AI Copilot —
+            IRWAN (irwan0888)
+        </h1>
+
+        <div class="container">
+
+            <div class="tf-buttons">
+                <button class="tf-btn"
+                    onclick="changeTf('1', this)">1m</button>
+                <button class="tf-btn"
+                    onclick="changeTf('5', this)">5m</button>
+                <button class="tf-btn"
+                    onclick="changeTf('15', this)">15m</button>
+                <button class="tf-btn"
+                    onclick="changeTf('60', this)">1h</button>
+                <button class="tf-btn"
+                    onclick="changeTf('240', this)">4h</button>
+                <button class="tf-btn active"
+                    onclick="changeTf('D', this)">Daily</button>
+            </div>
+
+            <div class="status-box" id="trendStatus">
+                Memeriksa data TREND PLUS...
+            </div>
+
+            <div class="chart-box">
+                <div id="tradingview_chart"
+                    style="height:300px;width:100%;">
+                </div>
+            </div>
+
+            <div class="chat-box">
+
+                <div class="chat-messages" id="chatMessages">
+                    <div>
+                        <b>Multi-AI Copilot:</b>
+                        Salam IRWAN. TREND PLUS akan menjadi sumber
+                        data utama selepas TradingView menghantar
+                        webhook ke Render.
+                    </div>
+                </div>
+
+                <div class="chat-input-area">
+
+                    <div style="
+                        display:flex;
+                        gap:8px;
+                        align-items:center;
+                    ">
+                        <span style="font-size:12px;">
+                            Pilih AI:
+                        </span>
+
+                        <select id="aiEngine"
+                            class="engine-select">
+                            <option value="gemini">
+                                Gemini AI
+                            </option>
+                            <option value="chatgpt">
+                                ChatGPT (OpenAI)
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="input-row">
+
+                        <input
+                            type="text"
+                            id="userInput"
+                            placeholder="Contoh: Apakah trend sekarang?"
+                            onkeypress="handleKeyPress(event)"
+                        >
+
+                        <button onclick="sendMessage()">
+                            Hantar
+                        </button>
+
+                    </div>
+
+                    <div class="small-note">
+                        AI membaca snapshot TREND PLUS terakhir
+                        yang diterima oleh Render.
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <script
+            type="text/javascript"
+            src="https://s3.tradingview.com/tv.js"
+        ></script>
+
+        <script type="text/javascript">
+
+            var tvWidget = new TradingView.widget({
+                "width": "100%",
+                "height": "300",
+                "symbol": "OANDA:XAUUSD",
+                "interval": "D",
+                "timezone": "Etc/UTC",
+                "theme": "dark",
+                "style": "1",
+                "locale": "en",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": true,
+                "allow_symbol_change": true,
+                "hide_side_toolbar": false,
+                "container_id": "tradingview_chart"
+            });
+
+
+            function changeTf(tf, button) {
+
+                document
+                    .querySelectorAll(".tf-btn")
+                    .forEach(function(btn) {
+                        btn.classList.remove("active");
+                    });
+
+                button.classList.add("active");
+
+                try {
+                    tvWidget
+                        .chart()
+                        .setResolution(tf, function() {});
+                } catch (e) {
+                    console.log(e);
+                }
+            }
+
+
+            function escapeHtml(text) {
+
+                return String(text)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+
+            function sendMessage() {
+
+                var input =
+                    document.getElementById("userInput");
+
+                var engineSelect =
+                    document.getElementById("aiEngine");
+
+                var text = input.value.trim();
+                var engine = engineSelect.value;
+
+                if (!text) return;
+
+                var messages =
+                    document.getElementById("chatMessages");
+
+                messages.innerHTML +=
+                    '<div style="margin-top:8px;">' +
+                    '<b>Anda:</b> ' +
+                    escapeHtml(text) +
+                    '</div>';
+
+                input.value = "";
+                messages.scrollTop = messages.scrollHeight;
+
+                fetch("/ask", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        prompt: text,
+                        engine: engine
+                    })
+                })
+                .then(function(response) {
+                    return response.json();
+                })
+                .then(function(data) {
+
+                    var engineName =
+                        engine === "chatgpt"
+                            ? "ChatGPT AI"
+                            : "Gemini AI";
+
+                    var reply =
+                        data.reply || "Tiada jawapan.";
+
+                    var formattedReply =
+                        escapeHtml(reply)
+                            .replace(/\n/g, "<br>");
+
+                    messages.innerHTML +=
+                        '<div style="' +
+                        'margin-top:8px;color:#f2a900;' +
+                        '">' +
+                        '<b>' +
+                        engineName +
+                        ':</b><br>' +
+                        formattedReply +
+                        '</div>';
+
+                    messages.scrollTop =
+                        messages.scrollHeight;
+                })
+                .catch(function(error) {
+
+                    messages.innerHTML +=
+                        '<div style="' +
+                        'margin-top:8px;color:red;' +
+                        '">' +
+                        '<b>Ralat:</b> ' +
+                        'Gagal berhubung dengan pelayan AI.' +
+                        '</div>';
+
+                    messages.scrollTop =
+                        messages.scrollHeight;
+
+                    console.log(error);
+                });
+            }
+
+
+            function handleKeyPress(e) {
+
+                if (e.key === "Enter") {
+                    sendMessage();
+                }
+            }
+
+
+            function refreshTrendStatus() {
+
+                fetch("/trend-plus")
+                    .then(function(response) {
+                        return response.json();
+                    })
+                    .then(function(result) {
+
+                        var box =
+                            document.getElementById(
+                                "trendStatus"
+                            );
+
+                        var data = result.data || {};
+
+                        if (data.status === "waiting") {
+
+                            box.className =
+                                "status-box status-wait";
+
+                            box.innerHTML =
+                                "TREND PLUS: Menunggu " +
+                                "data TradingView...";
+                            return;
+                        }
+
+                        box.className =
+                            "status-box status-ok";
+
+                        var symbol =
+                            data.symbol || "-";
+
+                        var tf =
+                            data.timeframe || "-";
+
+                        var event =
+                            data.event || "NONE";
+
+                        var trend =
+                            data.external_trend || "-";
+
+                        box.innerHTML =
+                            "TREND PLUS LIVE — " +
+                            escapeHtml(symbol) +
+                            " | TF: " +
+                            escapeHtml(tf) +
+                            " | EVENT: " +
+                            escapeHtml(event) +
+                            " | TREND: " +
+                            escapeHtml(trend);
+                    })
+                    .catch(function() {
+
+                        var box =
+                            document.getElementById(
+                                "trendStatus"
+                            );
+
+                        box.className =
+                            "status-box status-wait";
+
+                        box.innerHTML =
+                            "TREND PLUS: Gagal membaca " +
+                            "data Render.";
+                    });
+            }
+
+
+            refreshTrendStatus();
+
+            setInterval(
+                refreshTrendStatus,
+                5000
+            );
+
+        </script>
+
+    </body>
+    </html>
+    """
+
+    return render_template_string(html_content)
+
+
+# ============================================================
+# LOCAL / RENDER START
+# ============================================================
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
