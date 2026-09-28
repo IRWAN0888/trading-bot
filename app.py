@@ -29,7 +29,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 
 # Optional webhook secret.
-# Leave empty for the first TradingView -> Render test.
 WEBHOOK_SECRET = os.environ.get("TREND_PLUS_WEBHOOK_SECRET", "").strip()
 
 
@@ -725,6 +724,8 @@ def capture():
 
                             box.className =
                                 "status-box status-wait";
+
+                            box.className = "status-box status-wait";
 
                             box.innerHTML =
                                 "TREND PLUS: Menunggu " +
