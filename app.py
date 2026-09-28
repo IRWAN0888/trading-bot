@@ -14,6 +14,12 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
 # ------------------------------------------------------------
 # API KEYS
 # Set these in Render Environment Variables.
@@ -543,11 +549,6 @@ def capture():
             </div>
         </div>
 
-        <script
-            type="text/javascript"
-            src="https://s3.tradingview.com/tv.js"
-        ></script>
-
         <script type="text/javascript">
             var tvWidget = null;
 
@@ -781,21 +782,29 @@ def capture():
                 5000
             );
 
-            // TradingView is optional for the Render dashboard.
-            // Retry loading it without stopping the status/chat scripts.
-            function startTradingViewWhenReady(attempt) {
-                attempt = attempt || 0;
-                if (initTradingView()) {
-                    return;
-                }
-                if (attempt < 10) {
-                    setTimeout(function() {
-                        startTradingViewWhenReady(attempt + 1);
-                    }, 1000);
-                }
+            // IMPORTANT: load TradingView asynchronously so tv.js can NEVER
+            // block the Render status polling or AI chat JavaScript.
+            function loadTradingViewAsync() {
+                var script = document.createElement("script");
+                script.type = "text/javascript";
+                script.src = "https://s3.tradingview.com/tv.js";
+                script.async = true;
+
+                script.onload = function() {
+                    console.log("TradingView library loaded.");
+                    initTradingView();
+                };
+
+                script.onerror = function() {
+                    console.log("TradingView library gagal dimuat. Render/AI tetap berjalan.");
+                };
+
+                document.head.appendChild(script);
             }
 
-            startTradingViewWhenReady(0);
+            // Start external TradingView loading only AFTER all local JS
+            // functions above are active.
+            loadTradingViewAsync();
 
         </script>
 
