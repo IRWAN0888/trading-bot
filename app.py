@@ -549,22 +549,36 @@ def capture():
         ></script>
 
         <script type="text/javascript">
+            var tvWidget = null;
 
-            var tvWidget = new TradingView.widget({
-                "width": "100%",
-                "height": "300",
-                "symbol": "OANDA:XAUUSD",
-                "interval": "D",
-                "timezone": "Etc/UTC",
-                "theme": "dark",
-                "style": "1",
-                "locale": "en",
-                "toolbar_bg": "#f1f3f6",
-                "enable_publishing": true,
-                "allow_symbol_change": true,
-                "hide_side_toolbar": false,
-                "container_id": "tradingview_chart"
-            });
+            function initTradingView() {
+                if (!window.TradingView || !window.TradingView.widget) {
+                    console.log("TradingView widget library belum tersedia.");
+                    return false;
+                }
+
+                try {
+                    tvWidget = new TradingView.widget({
+                        "width": "100%",
+                        "height": "300",
+                        "symbol": "OANDA:XAUUSD",
+                        "interval": "D",
+                        "timezone": "Etc/UTC",
+                        "theme": "dark",
+                        "style": "1",
+                        "locale": "en",
+                        "toolbar_bg": "#f1f3f6",
+                        "enable_publishing": false,
+                        "allow_symbol_change": true,
+                        "hide_side_toolbar": false,
+                        "container_id": "tradingview_chart"
+                    });
+                    return true;
+                } catch (e) {
+                    console.log("TradingView init error:", e);
+                    return false;
+                }
+            }
 
 
             function changeTf(tf, button) {
@@ -578,9 +592,11 @@ def capture():
                 button.classList.add("active");
 
                 try {
-                    tvWidget
-                        .chart()
-                        .setResolution(tf, function() {});
+                    if (tvWidget && tvWidget.chart) {
+                        tvWidget
+                            .chart()
+                            .setResolution(tf, function() {});
+                    }
                 } catch (e) {
                     console.log(e);
                 }
@@ -757,12 +773,29 @@ def capture():
             }
 
 
+            // Poll Render independently of TradingView embed.
             refreshTrendStatus();
 
             setInterval(
                 refreshTrendStatus,
                 5000
             );
+
+            // TradingView is optional for the Render dashboard.
+            // Retry loading it without stopping the status/chat scripts.
+            function startTradingViewWhenReady(attempt) {
+                attempt = attempt || 0;
+                if (initTradingView()) {
+                    return;
+                }
+                if (attempt < 10) {
+                    setTimeout(function() {
+                        startTradingViewWhenReady(attempt + 1);
+                    }, 1000);
+                }
+            }
+
+            startTradingViewWhenReady(0);
 
         </script>
 
