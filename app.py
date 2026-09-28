@@ -29,6 +29,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 
 # Optional webhook secret.
+# Leave empty for the first TradingView -> Render test.
 WEBHOOK_SECRET = os.environ.get("TREND_PLUS_WEBHOOK_SECRET", "").strip()
 
 
@@ -57,17 +58,12 @@ if OPENAI_API_KEY:
 
 
 # ------------------------------------------------------------
-# LATEST TREND PLUS DATA (Fallback data so it never stays stuck)
+# LATEST TREND PLUS DATA
 # ------------------------------------------------------------
 LATEST_TREND_PLUS = {
-    "status": "active",
+    "status": "waiting",
     "source": "TREND PLUS",
-    "symbol": "XAUUSD",
-    "ticker": "OANDA:XAUUSD",
-    "timeframe": "D",
-    "event": "G1",
-    "external_trend": "BULLISH",
-    "message": "Data lalai diaktifkan untuk mengelakkan paparan kosong."
+    "message": "Belum menerima data daripada TradingView."
 }
 
 
@@ -76,6 +72,9 @@ def utc_now_iso():
 
 
 def build_trend_context():
+    if not LATEST_TREND_PLUS:
+        return "Belum ada data TREND PLUS daripada TradingView."
+
     return (
         "\n\n===== DATA LIVE TERKINI TREND PLUS =====\n"
         + str(LATEST_TREND_PLUS)
@@ -172,6 +171,16 @@ def trend_plus_data():
     })
 
 
+@app.route("/test-webhook")
+def test_webhook():
+    return jsonify({
+        "endpoint": "/webhook/trend-plus",
+        "method": "POST",
+        "ready": True,
+        "current_status": LATEST_TREND_PLUS.get("status")
+    })
+
+
 @app.route("/trend-plus/raw")
 def trend_plus_raw():
     return jsonify(LATEST_TREND_PLUS)
@@ -220,6 +229,9 @@ def ask_ai():
             "Untuk TREND PLUS, gunakan data yang diterima daripada "
             "TradingView sebagai sumber utama. "
             "Jangan mereka-reka nilai indikator yang tidak dihantar.\n"
+
+            "Jika sesuatu data tiada atau bernilai NONE/NA, nyatakan "
+            "bahawa data tersebut belum tersedia.\n\n"
 
             "Berikan jawapan teknikal, ringkas tetapi tajam, "
             "profesional dan dalam Bahasa Melayu."
@@ -276,7 +288,9 @@ def ask_ai():
         return jsonify({
             "reply": reply_text,
             "engine": ai_engine,
-            "trend_plus_received": True
+            "trend_plus_received": (
+                LATEST_TREND_PLUS.get("status") != "waiting"
+            )
         }), 200
 
     except Exception as e:
@@ -478,8 +492,8 @@ def capture():
                     onclick="changeTf('D', this)">Daily</button>
             </div>
 
-            <div class="status-box status-ok" id="trendStatus">
-                TREND PLUS LIVE — Memuatkan data...
+            <div class="status-box" id="trendStatus">
+                Memeriksa data TREND PLUS...
             </div>
 
             <div class="chart-box">
@@ -493,7 +507,9 @@ def capture():
                 <div class="chat-messages" id="chatMessages">
                     <div>
                         <b>Multi-AI Copilot:</b>
-                        Salam IRWAN. Sistem siap membaca data TREND PLUS. Silakan tanya soalan analisis.
+                        Salam IRWAN. TREND PLUS akan menjadi sumber
+                        data utama selepas TradingView menghantar
+                        webhook ke Render.
                     </div>
                 </div>
 
@@ -535,7 +551,8 @@ def capture():
                     </div>
 
                     <div class="small-note">
-                        AI membaca snapshot TREND PLUS aktif pada pelayan.
+                        AI membaca snapshot TREND PLUS terakhir
+                        yang diterima oleh Render.
                     </div>
 
                 </div>
@@ -714,20 +731,31 @@ def capture():
 
                         var data = result.data || {};
 
+                        if (data.status === "waiting") {
+
+                            box.className =
+                                "status-box status-wait";
+
+                            box.innerHTML =
+                                "TREND PLUS: Menunggu " +
+                                "data TradingView...";
+                            return;
+                        }
+
                         box.className =
                             "status-box status-ok";
 
                         var symbol =
-                            data.symbol || "XAUUSD";
+                            data.symbol || "-";
 
                         var tf =
-                            data.timeframe || "D";
+                            data.timeframe || "-";
 
                         var event =
-                            data.event || "G1";
+                            data.event || "NONE";
 
                         var trend =
-                            data.external_trend || "BULLISH";
+                            data.external_trend || "-";
 
                         box.innerHTML =
                             "TREND PLUS LIVE — " +
@@ -740,21 +768,32 @@ def capture():
                             escapeHtml(trend);
                     })
                     .catch(function() {
+
                         var box =
                             document.getElementById(
                                 "trendStatus"
                             );
+
                         box.className =
-                            "status-box status-ok";
+                            "status-box status-wait";
+
                         box.innerHTML =
-                            "TREND PLUS LIVE — XAUUSD | TF: D | STATUS: Aktif";
+                            "TREND PLUS: Gagal membaca " +
+                            "data Render.";
                     });
             }
 
 
+            // Poll Render independently of TradingView embed.
             refreshTrendStatus();
-            setInterval(refreshTrendStatus, 5000);
 
+            setInterval(
+                refreshTrendStatus,
+                5000
+            );
+
+            // IMPORTANT: load TradingView asynchronously so tv.js can NEVER
+            // block the Render status polling or AI chat JavaScript.
             function loadTradingViewAsync() {
                 var script = document.createElement("script");
                 script.type = "text/javascript";
@@ -767,12 +806,14 @@ def capture():
                 };
 
                 script.onerror = function() {
-                    console.log("TradingView library gagal dimuat.");
+                    console.log("TradingView library gagal dimuat. Render/AI tetap berjalan.");
                 };
 
                 document.head.appendChild(script);
             }
 
+            // Start external TradingView loading only AFTER all local JS
+            // functions above are active.
             loadTradingViewAsync();
 
         </script>
